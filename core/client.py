@@ -581,7 +581,8 @@ def _compatibility_details(host: str) -> str:
 
 def _pairing_connection(host: str, device_uuid: str, timestamp: int,
                         preferred: str = "static",
-                        brand: str = "his") -> tuple[MqttSession, str]:
+                        brand: str = "his",
+                        candidates: tuple[str, ...] | None = None) -> tuple[MqttSession, str]:
     """Try each documented profile once, only after an explicit auth refusal.
 
     Reference implementations: stevene1919/hisense_vidaa/crypto.py,
@@ -590,7 +591,9 @@ def _pairing_connection(host: str, device_uuid: str, timestamp: int,
     declares in its descriptor; the value suffixes are firmware constants.
     Network and TLS failures cannot be fixed by changing credentials.
     """
-    profiles = list(dict.fromkeys((preferred,) + protocol.AUTH_PROFILES))
+    profiles = list(dict.fromkeys(
+        candidates if candidates is not None
+        else (preferred,) + protocol.AUTH_PROFILES))
     attempted = []
     for profile in profiles:
         sess = MqttSession(host, device_uuid, timestamp, auth_profile=profile,
@@ -650,29 +653,46 @@ def pair(host: str, pin_provider, timeout: float = 60.0) -> Session:
         # Toshiba firmware. Fresh pairings try static first; a known working
         # profile still takes priority when pairing the same TV again.
         preferred = previous.auth_profile if reuse else "static"
-        sess, auth_profile = _pairing_connection(host, device_uuid,
-                                                tv_timestamp(host), preferred,
-                                                brand=brand)
-        since = len(sess.messages)
-        sess.subscribe([
-            sess.topics["mobile"] + "ui_service/data/authentication",
-            sess.topics["mobile"] + "ui_service/data/authenticationcode",
-            sess.topics["token_reply"],
-        ])
-        time.sleep(0.3)
+        order = list(dict.fromkeys((preferred,) + protocol.AUTH_PROFILES))
+        tried: list[str] = []
         notification = None
-        if auth_profile == "static":
-            # Pre-token firmware shows the PIN in response to a state query.
-            # Newer static-auth TVs can still use vidaa_app_connect.
-            sess.publish(sess.topics["ui"] + "actions/gettvstate", "")
-            notification = sess.wait_for("data/authentication", 5, since)
-        if notification is None:
-            sess.publish(sess.topics["ui"] + "actions/vidaa_app_connect",
-                         protocol.pair_connect_payload())
-            notification = sess.wait_for("data/authentication",
-                                         10 if auth_profile == "static" else 15, since)
-        if notification is None:
-            raise TimeoutError("the TV did not display the PIN")
+        while True:
+            # A connected profile does not prove the TV will act for it:
+            # transitional firmware can accept the static login without
+            # honouring its ui_service actions, so no PIN ever appears.
+            # Walk the remaining profiles before failing.
+            candidates = tuple(p for p in order if p not in tried)
+            if not candidates:
+                raise TimeoutError("the TV did not display the PIN (profiles "
+                                   "tried: " + ", ".join(tried) + ")")
+            sess, auth_profile = _pairing_connection(host, device_uuid,
+                                                    tv_timestamp(host),
+                                                    candidates[0], brand=brand,
+                                                    candidates=candidates)
+            since = len(sess.messages)
+            sess.subscribe([
+                sess.topics["mobile"] + "ui_service/data/authentication",
+                sess.topics["mobile"] + "ui_service/data/authenticationcode",
+                sess.topics["token_reply"],
+            ])
+            time.sleep(0.3)
+            if auth_profile == "static":
+                # Pre-token firmware shows the PIN in response to a state query.
+                # Newer static-auth TVs can still use vidaa_app_connect.
+                sess.publish(sess.topics["ui"] + "actions/gettvstate", "")
+                notification = sess.wait_for("data/authentication", 5, since)
+            if notification is None:
+                sess.publish(sess.topics["ui"] + "actions/vidaa_app_connect",
+                             protocol.pair_connect_payload())
+                notification = sess.wait_for(
+                    "data/authentication",
+                    10 if auth_profile == "static" else 15, since)
+            if notification is not None:
+                break
+            tried.append(auth_profile)
+            log("auth", f"no PIN from profile {auth_profile}: trying the next one")
+            sess.stop()
+            sess = None
         pin = pin_provider()
         if not pin:
             raise ValueError("PIN not entered")

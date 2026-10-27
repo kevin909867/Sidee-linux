@@ -27,6 +27,8 @@ class TestAuthenticationCompatibility(unittest.TestCase):
         stack.enter_context(patch.object(client, "log"))
         self.connections = []
         self.accepted_profile = "static"
+        self.also_accepted = set()
+        self.silent_profiles = set()
         self.token_reply = None
         self.pin_reply = '{"result": 1}'
         self.apps_reply = "[]"
@@ -54,7 +56,8 @@ class TestAuthenticationCompatibility(unittest.TestCase):
                     raise self.failure
                 if self.broker_throttled:
                     return 5
-                rc = 0 if profile == self.accepted_profile else self.failure
+                rc = 0 if (profile == self.accepted_profile
+                           or profile in self.also_accepted) else self.failure
                 if rc in (4, 5) and self.throttle_on_rejection:
                     self.broker_throttled = True
                 return rc
@@ -62,6 +65,14 @@ class TestAuthenticationCompatibility(unittest.TestCase):
             original_publish = connection.publish
 
             def publish(topic, payload=""):
+                if profile in self.silent_profiles and (
+                        topic.endswith("actions/vidaa_app_connect")
+                        or topic.endswith("actions/gettvstate")):
+                    # Connected, but this profile's requests are ignored: the
+                    # TV never opens a PIN dialog.
+                    connection.published.append(
+                        (topic, json.loads(payload) if payload else ""))
+                    return
                 if (profile == "static" and self.legacy_pin
                         and topic.endswith("actions/vidaa_app_connect")):
                     connection.published.append((topic, json.loads(payload)))
@@ -222,6 +233,34 @@ serialNumber=private-serial</modelDescription></device></root>''')
         session = self.pair()
         self.assertEqual([c.profile for c in self.connections], ["static"])
         self.assertTrue(session.tokenless)
+
+    def test_connected_profile_without_a_pin_falls_through_to_the_next(self):
+        # Transitional firmware can accept the static login without acting on
+        # its ui_service requests: the broker answers, but no PIN appears.
+        self.also_accepted = {"middle"}
+        self.silent_profiles = {"static"}
+        self.token_reply = '{"accesstoken": "A", "refreshtoken": "R"}'
+        session = self.pair()
+        # static connects but stays silent; the broker then refuses modern
+        # and accepts middle, which is the profile this TV actually honours.
+        self.assertEqual([c.profile for c in self.connections],
+                         ["static", "modern", "middle"])
+        self.assertEqual(session.auth_profile, "middle")
+        self.assertTrue(all(c.stopped for c in self.connections))
+        self.assertEqual(client.Session.load().auth_profile, "middle")
+
+    def test_no_pin_from_any_profile_reports_each_attempt(self):
+        self.also_accepted = {"modern", "middle", "remotenow"}
+        self.silent_profiles = {"static", "modern", "middle", "remotenow"}
+        with self.assertRaisesRegex(
+                TimeoutError,
+                "did not display the PIN \\(profiles tried: "
+                "static, modern, middle, remotenow\\)"):
+            self.pair()
+        self.assertEqual([c.profile for c in self.connections],
+                         ["static", "modern", "middle", "remotenow"])
+        self.assertTrue(all(c.stopped for c in self.connections))
+        self.assertFalse(os.path.exists(self.path))
 
     def test_known_modern_pairing_keeps_its_profile_and_topic_identity(self):
         self.accepted_profile = "modern"

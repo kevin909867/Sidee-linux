@@ -9,7 +9,7 @@ import time
 from . import client
 
 PIN_WAIT = 60.0  # the TV's PIN dialog lasts about one minute
-START_WAIT = 70.0  # TV clock lookup, up to four auth profiles, then PIN notification
+START_WAIT = 90.0  # TV clock lookup, up to four auth profiles, then PIN notification
 TOKEN_WAIT = 20.0
 
 
