@@ -36,15 +36,46 @@ def profile_dir() -> Path:
     return base
 
 
+def user_state_dir() -> Path:
+    """Writable per-user folder used when the program files themselves are not.
+
+    Distro packages and Nix installs keep Sidee's files under a read-only prefix
+    (for example /usr/share/sidee), so runtime state must live in the user's
+    profile instead of next to the source.
+    """
+    if sys.platform == "darwin":
+        return (Path(os.path.expanduser("~")) / "Library" / "Application Support"
+                / "Sidee")
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA", "").strip()
+        root = (Path(base) if base
+                else Path(os.path.expanduser("~")) / "AppData" / "Local")
+        return root / "Sidee"
+    base = os.environ.get("XDG_STATE_HOME", "").strip()
+    root = (Path(base).expanduser() if base
+            else Path(os.path.expanduser("~")) / ".local" / "state")
+    return root / "sidee"
+
+
+def _writable(path: Path) -> bool:
+    try:
+        return os.access(path, os.W_OK)
+    except OSError:
+        return False
+
+
 def dashboard_state_path(project_root: str | Path) -> Path:
-    """Keep writable runtime files outside a frozen macOS application bundle."""
+    """Keep writable runtime files outside a frozen app or read-only prefix."""
     override = _state_override()
     if override is not None:
         return override / "runtime" / "dashboard.json"
     if sys.platform == "darwin" and getattr(sys, "frozen", False):
-        return (Path(os.path.expanduser("~")) / "Library" / "Application Support"
-                / "Sidee" / "runtime" / "dashboard.json")
-    return Path(project_root) / ".runtime" / "dashboard.json"
+        return user_state_dir() / "runtime" / "dashboard.json"
+    root = Path(project_root)
+    if not _writable(root):
+        # A distro package or Nix store path is read-only for normal users.
+        return user_state_dir() / "runtime" / "dashboard.json"
+    return root / ".runtime" / "dashboard.json"
 
 
 def allow_reuse_address() -> bool:
@@ -108,6 +139,39 @@ def broadcasts_from_ipconfig(output: str) -> list[str]:
     return sorted({target for _, target in _interfaces_from_ipconfig(output)})
 
 
+def _interfaces_from_ip_addr(output: str) -> list[tuple[str, str]]:
+    """Parse Linux ``ip -o -4 addr show`` output into IPv4/broadcast pairs.
+
+    Lines look like ``2: eth0    inet 192.168.1.5/24 brd 192.168.1.255 scope
+    global ...``. The broadcast is always derived from the prefix length, so a
+    missing ``brd`` field (point-to-point links) is handled too. Loopback,
+    link-local, multicast and single-address (/31, /32) networks are ignored,
+    matching the macOS parser.
+    """
+    interfaces: set[tuple[str, str]] = set()
+    pattern = re.compile(r"\binet\s+(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})\b")
+    for line in output.splitlines():
+        match = pattern.search(line)
+        if not match:
+            continue
+        host, prefix = match.group(1), int(match.group(2))
+        try:
+            address = ipaddress.IPv4Address(host)
+            network = ipaddress.IPv4Network(f"{address}/{prefix}", strict=False)
+        except ValueError:
+            continue
+        if (address.is_unspecified or address.is_multicast
+                or address.is_loopback or address.is_link_local
+                or network.prefixlen >= 31):
+            continue
+        interfaces.add((str(address), str(network.broadcast_address)))
+    return sorted(interfaces)
+
+
+def broadcasts_from_ip_addr(output: str) -> list[str]:
+    return sorted({target for _, target in _interfaces_from_ip_addr(output)})
+
+
 def _interfaces_from_ifconfig(output: str) -> list[tuple[str, str]]:
     """Parse active macOS broadcast interfaces, including hexadecimal masks."""
     interfaces = set()
@@ -153,6 +217,24 @@ def broadcasts_from_ifconfig(output: str) -> list[str]:
     return sorted({target for _, target in _interfaces_from_ifconfig(output)})
 
 
+def _linux_ipv4_interfaces(kwargs: dict) -> list[tuple[str, str]]:
+    """Prefer iproute2 ``ip``; fall back to net-tools ``ifconfig`` when absent."""
+    attempts = ((["ip", "-o", "-4", "addr", "show"], _interfaces_from_ip_addr),
+                (["ifconfig"], _interfaces_from_ifconfig),
+                (["/sbin/ifconfig"], _interfaces_from_ifconfig),
+                (["/usr/sbin/ifconfig"], _interfaces_from_ifconfig))
+    for command, parser in attempts:
+        try:
+            result = subprocess.run(command, **kwargs)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode == 0:
+            interfaces = parser(result.stdout)
+            if interfaces:
+                return interfaces
+    return []
+
+
 def local_ipv4_interfaces() -> list[tuple[str, str]]:
     """Inspect native LAN interfaces, returning their IPv4/broadcast pairs."""
     kwargs = dict(capture_output=True, text=True, errors="replace", timeout=3)
@@ -161,6 +243,8 @@ def local_ipv4_interfaces() -> list[tuple[str, str]]:
     elif os.name == "nt":
         command, parser = ["ipconfig"], _interfaces_from_ipconfig
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    elif sys.platform.startswith("linux"):
+        return _linux_ipv4_interfaces(kwargs)
     else:
         return []
     try:

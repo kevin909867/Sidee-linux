@@ -14,7 +14,7 @@ Sidee is built around three principles:
 
 ## Requirements
 
-- Windows 10/11, or macOS 15+ (Apple Silicon or Intel)
+- Windows 10/11, macOS 15+ (Apple Silicon or Intel), or Linux with Python 3.9+ (any distribution, including Arch Linux and NixOS)
 - A compatible VIDAA TV and a computer on the same home Wi-Fi/Ethernet network
 - Internet access for the initial Windows setup and any online experiences you choose to open on the TV
 
@@ -44,6 +44,24 @@ The macOS download includes Sidee.app and its required runtime, so no separate P
 
 Sidee's control window must remain open while you use the dashboard; **Quit Sidee** stops the local dashboard service.
 
+### Linux
+
+Every major distribution is supported, with no root rights required for the simplest option:
+
+1. [Download Sidee for Linux](https://github.com/Empi9245/Sidee/releases) (`sidee-linux.tar.gz`) and extract it.
+2. Run `./start-linux.sh` in the extracted `Sidee` folder.
+3. Wait for the dashboard to open in your browser, then follow the on-screen steps.
+
+On first launch, Sidee downloads a private, version-pinned copy of its connection library, verifying it with SHA-256. If your distribution already provides that library (`python3-paho-mqtt`), it is used instead and nothing is downloaded. Python 3.9+ must be installed; see the [Linux guide](docs/linux.md) for every other option:
+
+- `.deb` packages for Debian, Ubuntu and derivatives
+- `.rpm` packages for Fedora, RHEL, CentOS Stream, Rocky and AlmaLinux
+- `PKGBUILD` for Arch Linux, Manjaro and EndeavourOS
+- a Nix flake with a NixOS module for NixOS and other Nix systems
+- a universal `install.sh` for openSUSE, Alpine, Gentoo, Void and everything else
+
+The Linux guide also covers background operation with systemd, firewalls, VPNs, headless computers and troubleshooting.
+
 ## Connect your TV
 
 1. **Find TV:** Turn on your TV, put it on the same network as your computer, and select **Find TV**. Sidee uses the discovered address rather than assuming a fixed TV IP. If discovery fails, you can enter the address shown in the TV's network settings.
@@ -72,7 +90,7 @@ The first Windows setup downloads verified dependencies. Web experiences opened 
 
 ## Troubleshooting
 
-If **Find TV** cannot locate your TV, check that both devices share the same network and that a VPN, guest Wi-Fi, or firewall is not blocking local discovery. The manual IP option checks that the destination responds as a compatible TV and that port 36669 is reachable; it never bypasses PIN authorization.
+If **Find TV** cannot locate your TV, check that both devices share the same network and that a VPN, guest Wi-Fi, or firewall is not blocking local discovery. On Linux, see the [firewall, VPN and discovery](docs/linux.md#firewall-vpn-and-discovery) notes. The manual IP option checks that the destination responds as a compatible TV and that port 36669 is reachable; it never bypasses PIN authorization.
 
 Some TVs advertise themselves rather than replying directly to discovery. In that case, keep the TV on and retry **Find TV**. For known firmware-specific pairing limitations, see the [compatibility notes](docs/toshiba-compatibility.md).
 
@@ -102,7 +120,7 @@ Replace `TV_IP` with your TV's LAN address and `PRESET_ID` with an available bui
 
 Run Python tests with `python -m unittest discover -s tests` and dashboard interaction tests with `node --test tests/test_dashboard_selection.js`.
 
-Packaging information is in the [macOS build notes](docs/macos-build.md). Automated Windows and macOS builds are available through [GitHub Actions](https://github.com/Empi9245/Sidee/actions/workflows/build.yml).
+Packaging information is in the [macOS build notes](docs/macos-build.md) and the [Linux guide](docs/linux.md#building-the-packages-yourself); the Linux tarball, `.deb` and `.rpm` are produced by `python tools/build_linux_release.py`. Automated Windows, macOS and Linux builds are available through [GitHub Actions](https://github.com/Empi9245/Sidee/actions/workflows/build.yml).
 
 ## Why Sidee exists
 

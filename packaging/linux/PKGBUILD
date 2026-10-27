@@ -1,0 +1,52 @@
+# Maintainer: Sidee contributors
+# Build and install the checkout this file belongs to:
+#   cd packaging/linux && makepkg -si
+#
+# The sources are the local tree, so this works offline and needs no release
+# tarball: run it from the download folder or from a git clone.
+
+pkgname=sidee
+pkgver=0.1.4.2
+pkgrel=1
+pkgdesc='Manage web-app launcher tiles on your VIDAA TV'
+arch=('any')
+url='https://github.com/Empi9245/Sidee'
+license=('MIT')
+depends=('python' 'python-paho-mqtt')
+optdepends=('libnotify: desktop notifications from the dashboard')
+install="${pkgname}.install"
+source=()
+sha256sums=()
+
+# Absolute folder that holds this PKGBUILD, so packaging the local tree does not
+# depend on makepkg's current directory.
+pkgbuild_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+_srcdir="$pkgbuild_dir/../.."
+
+package() {
+  cd "$_srcdir"
+
+  install -d "${pkgdir}/usr/share/sidee"
+  cp -R sidee.py core assets docs README.md LICENSE "${pkgdir}/usr/share/sidee/"
+  # The local tree may hold bytecode from earlier runs; never ship it.
+  find "${pkgdir}/usr/share/sidee" -name __pycache__ -type d -prune -exec rm -rf {} +
+  find "${pkgdir}/usr/share/sidee" -name '*.pyc' -delete
+
+  install -Dm755 packaging/linux/sidee "${pkgdir}/usr/bin/sidee"
+  install -Dm644 packaging/linux/sidee.desktop \
+    "${pkgdir}/usr/share/applications/sidee.desktop"
+  install -Dm644 assets/sidee-logo.png "${pkgdir}/usr/share/pixmaps/sidee.png"
+  install -Dm644 packaging/linux/sidee.service \
+    "${pkgdir}/usr/lib/systemd/user/sidee.service"
+
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}
+
+# Publishing to the AUR: an AUR package must download a released archive instead
+# of reading the local tree. Replace the empty source/sha256sums lines with
+#   source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+#   sha256sums=('<sha256 of that archive>')      # fill in with: makepkg -g
+# and set _srcdir="${srcdir}/Sidee-${pkgver}" instead of the local path above.
+# The tag must already contain the Linux packaging files, which is why the local
+# tree is the default here.

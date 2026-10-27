@@ -61,6 +61,99 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  linux:
+    name: Linux tests, tarball, deb and rpm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13.16'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install the Linux connection library and package tools
+        run: |
+          python -m pip install paho-mqtt==2.1.0
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+      - name: Check imports, resources and Python syntax
+        run: |
+          python -m compileall -q sidee.py macos_launcher.py core tools tests
+          python sidee.py --self-test
+      - name: Check the Linux launcher and packaging scripts
+        run: |
+          sh -n start-linux.sh packaging/linux/install.sh packaging/linux/uninstall.sh packaging/linux/sidee
+          bash -n packaging/linux/PKGBUILD packaging/linux/sidee.install
+          python -c "from tools import build_linux_release as b; print('deb arch:', b.debian_architecture())"
+      - name: Run all source tests
+        run: |
+          python -u -X faulthandler -c "import faulthandler, unittest; faulthandler.dump_traceback_later(90, exit=True); result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.discover('tests')); faulthandler.cancel_dump_traceback_later(); raise SystemExit(not result.wasSuccessful())"
+          node --test tests/test_dashboard_selection.js
+      - name: Start and stop the source dashboard
+        run: python tools/smoke_test.py --source
+      - name: Build the Linux tarball, deb and rpm
+        run: |
+          python tools/build_linux_release.py --version 0.1.4.2
+          ls -l dist
+      - name: Inspect the built RPM
+        run: |
+          rpm -qip dist/sidee-*.noarch.rpm
+          rpm -qlp dist/sidee-*.noarch.rpm | tee rpm-files.txt
+          grep -qx '/usr/bin/sidee' rpm-files.txt
+          grep -qx '/usr/share/sidee/sidee.py' rpm-files.txt
+          grep -qx '/usr/share/sidee/core/tv-client.bundle' rpm-files.txt
+          grep -qx '/usr/share/applications/sidee.desktop' rpm-files.txt
+          grep -qx '/usr/lib/systemd/user/sidee.service' rpm-files.txt
+      - name: Install the deb system-wide and run its self-test
+        run: |
+          sudo apt-get install -y ./dist/sidee_*.deb
+          sidee --self-test
+          dpkg -L sidee | sort
+          test -f /usr/share/applications/sidee.desktop
+          test -f /usr/lib/systemd/user/sidee.service
+          sudo apt-get remove -y sidee
+      - name: Test first-time setup from the actual Linux download
+        run: |
+          download=$(mktemp -d)
+          tar xzf dist/sidee-linux.tar.gz -C "$download"
+          cd "$download/Sidee"
+          # The archive must keep the launchers executable for ./start-linux.sh.
+          test -x start-linux.sh
+          test -x install.sh
+          # --prepare-only always builds the private runtime, even when the
+          # workflow's own interpreter already has paho-mqtt installed.
+          env -u PYTHONPATH ./start-linux.sh --prepare-only
+          test -f .runtime/packages/paho-mqtt-2.1.0/paho/mqtt/client.py
+          # A second run reuses the runtime instead of downloading again.
+          env -u PYTHONPATH ./start-linux.sh --prepare-only
+          # A stale lock from a killed run must not block the next launch.
+          mkdir .runtime/setup.lock
+          env -u PYTHONPATH ./start-linux.sh --prepare-only
+          test ! -e .runtime/setup.lock
+          PYTHONPATH="$PWD/.runtime/packages/paho-mqtt-2.1.0" \
+            python "$GITHUB_WORKSPACE/tools/smoke_test.py" --source --source-root "$PWD"
+      - name: Install into a custom prefix and run the launcher
+        run: |
+          prefix=$(mktemp -d)/opt
+          sh packaging/linux/install.sh --system --prefix "$prefix" --no-systemd
+          "$prefix/bin/sidee" --self-test
+          test -f "$prefix/share/applications/sidee.desktop"
+          grep -q "Exec=$prefix/bin/sidee" "$prefix/share/applications/sidee.desktop"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Sidee-Linux
+          path: |
+            dist/sidee-linux.tar.gz
+            dist/sidee_*.deb
+            dist/sidee-*.noarch.rpm
+          if-no-files-found: error
+          retention-days: 30
+
   macos:
     name: macOS ${{ matrix.architecture }} app and DMG
     runs-on: ${{ matrix.runner }}
@@ -128,7 +221,7 @@ jobs:
   release:
     name: Prepare verified release assets
     if: "${{ github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.head_commit.message, 'release: v')) }}"
-    needs: [windows, macos]
+    needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write

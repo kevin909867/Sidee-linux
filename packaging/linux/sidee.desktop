@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Sidee
+GenericName=TV launcher manager
+Comment=Manage web-app launcher tiles on your VIDAA TV
+Exec=sidee
+TryExec=sidee
+Icon=sidee
+Terminal=false
+Categories=Utility;Settings;
+Keywords=TV;VIDAA;Hisense;Toshiba;launcher;tiles;remote;
+StartupNotify=true

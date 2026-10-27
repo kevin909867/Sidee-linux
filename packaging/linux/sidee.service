@@ -1,0 +1,18 @@
+[Unit]
+Description=Sidee local dashboard for VIDAA TV launcher tiles
+Documentation=https://github.com/Empi9245/Sidee
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sidee --headless
+Restart=on-failure
+RestartSec=5
+# The dashboard URL contains the private access key, so keep it out of the
+# journal. Run `sidee` in a terminal to open the running dashboard instead.
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target
