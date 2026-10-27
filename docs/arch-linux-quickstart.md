@@ -183,7 +183,7 @@ another one.
 | --- | --- | --- |
 | `403` on the dashboard | Missing or wrong `key=` | Use the full printed URL |
 | `Find TV` finds nothing | SSDP blocked, VPN, or guest Wi-Fi | Enter the IP manually; disable the VPN; use the main SSID |
-| `Port 36669 responds, but Sidee could not verify a VIDAA TV` + `Tried …` | The control port answered, but none of the descriptor endpoints identified the device; the message names each one and its status | Run the descriptor checks below, then check the IP |
+| `Port 36669 answered, so this looks like your TV, but its device description could not be confirmed` + `Tried …` | The control port answered; identity could not be read from any descriptor endpoint. Check TV IP **still accepts it** so you can pair, but the device stays unverified | Pair anyway — the PIN is the authorization. Keep the `Tried …` list for a report |
 | `No VIDAA TV description or port 36669 response at that IP` | Host unreachable or port closed | Check the address, the TV subnet, and any firewall |
 | `... rc=5` for every profile | Broker refused all four credential profiles | Firmware not supported; see the compatibility notes |
 | `no PIN from profile X: trying the next one` | Connected but ignored — the fallback working | Wait; the next profile is being tried |
@@ -218,20 +218,22 @@ PIN, no tokens and no dashboard key.
 
 ### When the IP check cannot identify the TV
 
-Sidee accepts a TV only if it can read a device description; an open control port
-on its own is deliberately not enough. It tries these, in order, with a 10-second
-total budget:
+When an address is entered by hand, Sidee tries each descriptor port with plain
+HTTP **and** the self-signed TLS those sets use, with a 10-second total budget. A
+port that swallows plain HTTP instead of refusing it (a timeout rather than
+`ConnectionRefusedError`) usually means the descriptor is served over TLS there:
 
 ```
 http://TV_IP:18400/MediaServer/rendererdevicedesc.xml
+https://TV_IP:18400/MediaServer/rendererdevicedesc.xml
 http://TV_IP:18400/description.xml
-http://TV_IP:38400/MediaServer/rendererdevicedesc.xml
-http://TV_IP:38400/description.xml
-http://TV_IP/MediaServer/rendererdevicedesc.xml
-http://TV_IP/description.xml
-https://TV_IP:38400/MediaServer/rendererdevicedesc.xml   (self-signed, not verified)
-https://TV_IP:38400/description.xml
+https://TV_IP:18400/description.xml
+... the same four for port 38400, then for port 80
 ```
+
+If none of them answer, Sidee reports the attempts and continues anyway when port
+36669 answered: the broker is what the control protocol needs, and the PIN on the
+TV is the real authorization.
 
 Check them from a shell yourself — whichever answers tells you what the TV serves:
 

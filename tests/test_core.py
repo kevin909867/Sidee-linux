@@ -195,25 +195,38 @@ class TestManualTvIP(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("36669", result["error"])
 
-    def test_open_tcp_does_not_bypass_vidaa_identification(self):
+    def test_open_control_port_continues_pairing_as_unverified(self):
+        # Some firmware publishes no descriptor on a documented endpoint while
+        # still serving the broker the control protocol actually needs. The PIN
+        # on the TV is the authorization, so the probe continues and says so.
         with patch("core.webui.client.fetch_descriptor", return_value=None), \
              patch("core.webui.socket.create_connection"):
             result = webui._probe_tv_ip("192.168.3.4")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["unverified"])
+        self.assertEqual(result["tv"]["host"], "192.168.3.4")
+        self.assertIn("PIN", result["message"])
+
+    def test_closed_control_port_without_a_description_is_still_refused(self):
+        with patch("core.webui.client.fetch_descriptor", return_value=None), \
+             patch("core.webui.socket.create_connection",
+                   side_effect=OSError("refused")):
+            result = webui._probe_tv_ip("192.168.3.4")
         self.assertFalse(result["ok"])
-        self.assertIn("verify", result["error"])
+        self.assertIn("36669", result["error"])
 
     def test_failed_probe_reports_the_endpoints_it_asked(self):
         def nobody_home(host, location=None, attempts=None):
             attempts.append((f"http://{host}:18400/description.xml", "HTTP 404"))
-            attempts.append((f"https://{host}:38400/description.xml", "ConnectionRefusedError"))
+            attempts.append((f"https://{host}:18400/description.xml", "ConnectionRefusedError"))
             return None
 
         with patch("core.webui.client.fetch_descriptor", side_effect=nobody_home), \
              patch("core.webui.socket.create_connection"):
             result = webui._probe_tv_ip("192.168.3.4")
-        self.assertFalse(result["ok"])
-        self.assertIn("/description.xml on http:18400 -> HTTP 404", result["error"])
-        self.assertIn("ConnectionRefusedError", result["error"])
+        self.assertIn("/description.xml on http:18400 -> HTTP 404",
+                      result["message"])
+        self.assertIn("ConnectionRefusedError", result["message"])
 
 
 class TestVerboseLogging(unittest.TestCase):

@@ -398,11 +398,17 @@ def discover(timeout: float = 4.0) -> list[TvInfo]:
 
 
 def _descriptor_locations(host: str) -> list[str]:
-    """Documented descriptor endpoints, plain HTTP first, then the self-signed
-    TLS on 38400 that many sets expose as their only descriptor service."""
-    return ([f"http://{host}:{port}{path}"
-             for port in UPNP_PORTS for path in UPNP_PATHS]
-            + [f"https://{host}:38400{path}" for path in UPNP_PATHS])
+    """Documented descriptor endpoints, plain HTTP and self-signed TLS per port.
+
+    A set can serve the descriptor under TLS on the same port it uses for plain
+    HTTP elsewhere, and a TLS-only listener answers plain HTTP by dropping the
+    connection (a timeout) instead of refusing it, so both schemes are tried on
+    every port before moving to the next one.
+    """
+    return [f"{scheme}://{host}:{port}{path}"
+            for port in UPNP_PORTS
+            for scheme in ("http", "https")
+            for path in UPNP_PATHS]
 
 
 def _descriptor_connection(loc: str) -> tuple[object, str] | None:

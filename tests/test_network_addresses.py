@@ -57,7 +57,9 @@ class TestDescriptorAddresses(unittest.TestCase):
         for connection in connections:
             connection.close.assert_called_once()
 
-    def test_self_signed_https_descriptor_on_38400_is_accepted(self):
+    def test_self_signed_https_descriptor_on_the_same_port_is_accepted(self):
+        # A TLS-only listener accepts the connection and then drops plain HTTP,
+        # which reaches us as a timeout rather than a refusal.
         offline = Mock()
         offline.request.side_effect = OSError("no plain HTTP descriptor")
         secure = self.descriptor()
@@ -66,10 +68,22 @@ class TestDescriptorAddresses(unittest.TestCase):
                              return_value=secure) as https:
             tv = client.fetch_descriptor("192.168.88.73")
         self.assertTrue(tv.is_vidaa)
-        https.assert_called_once_with("192.168.88.73", 38400, timeout=3,
+        https.assert_called_once_with("192.168.88.73", 18400, timeout=3,
                                       context=ANY)
         secure.request.assert_called_once_with(
             "GET", "/MediaServer/rendererdevicedesc.xml")
+
+    def test_every_descriptor_port_is_tried_with_both_schemes(self):
+        locations = client._descriptor_locations("192.168.88.73")
+        self.assertEqual(len(locations), len(client.UPNP_PORTS) * 2
+                         * len(client.UPNP_PATHS))
+        self.assertIn("https://192.168.88.73:18400/description.xml", locations)
+        self.assertIn("https://192.168.88.73:38400/description.xml", locations)
+        # The plain-HTTP probe of a port immediately precedes its TLS probe.
+        self.assertEqual(locations.index(
+            "https://192.168.88.73:18400/MediaServer/rendererdevicedesc.xml"),
+            locations.index(
+                "http://192.168.88.73:18400/MediaServer/rendererdevicedesc.xml") + 2)
 
     def test_generic_descriptor_does_not_shadow_the_vidaa_one(self):
         router = Mock()

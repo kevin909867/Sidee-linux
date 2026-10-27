@@ -84,13 +84,27 @@ def _probe_tv_ip(host: str) -> dict:
         tried = client.describe_attempts(attempts)
         client.log("tv", f"probe {address}: mqtt "
                            f"{'open' if mqtt_open else 'closed'}; {tried}")
-        message = ("Port 36669 responds, but Sidee could not verify a VIDAA TV "
-                   "using its device description." if mqtt_open else
-                   "No VIDAA TV description or port 36669 response at that IP. "
-                   "Check the TV address, its network and VPN settings.")
+        if not mqtt_open:
+            message = ("No VIDAA TV description or port 36669 response at that IP. "
+                       "Check the TV address, its network and VPN settings.")
+            if tried:
+                message += f" Tried {tried}."
+            return {"ok": False, "error": message}
+        # The broker is the only service the control protocol needs; the
+        # descriptor is identity metadata that some firmware never publishes on
+        # a known port. The PIN shown on the TV is the real authorization, so
+        # continue and say plainly that the identity is unconfirmed.
+        message = ("Port 36669 answered, so this looks like your TV, but its "
+                   "device description could not be confirmed. You can still "
+                   "request a code; the PIN on the TV is what authorizes Sidee.")
         if tried:
             message += f" Tried {tried}."
-        return {"ok": False, "error": message}
+        return {"ok": True, "unverified": True,
+                "tv": {"host": str(address),
+                       "friendly_name": f"TV at {address}", "model": "",
+                       "is_vidaa": False, "brand": "his",
+                       "raw_description": ""},
+                "message": message}
     if not mqtt_open:
         return {"ok": False, "error": "VIDAA TV found, but TCP port 36669 is "
                 "unreachable. Check local network permissions, VPN, firewall "
