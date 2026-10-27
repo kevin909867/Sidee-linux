@@ -84,6 +84,8 @@ def main() -> int:
                    help="dashboard port (0 selects a free port)")
     p.add_argument("--self-test", action="store_true",
                    help="check bundled imports, resources, TLS and Tcl without a GUI")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="print discovery, descriptor and pairing diagnostics")
     sub = p.add_subparsers(dest="cmd")
     sub.add_parser("discover")
     pr = sub.add_parser("pair"); pr.add_argument("host")
@@ -93,6 +95,7 @@ def main() -> int:
     sub.add_parser("list")
     la = sub.add_parser("launch"); la.add_argument("preset")
     a = p.parse_args()
+    client.set_verbose(a.verbose)
 
     if a.port is not None and not 0 <= a.port <= 65535:
         p.error("--port must be between 0 and 65535")

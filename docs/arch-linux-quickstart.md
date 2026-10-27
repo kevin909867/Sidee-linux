@@ -73,6 +73,7 @@ the PKGBUILD packages the tree it sits in.
 ./start-linux.sh --prepare-only       # download the library, then exit
 SIDEE_PYTHON=/usr/bin/python3.13 ./start-linux.sh   # force an interpreter
 SIDEE_STATE_DIR=/tmp/try ./start-linux.sh           # scratch state, real pairing untouched
+./start-linux.sh -v                                   # diagnostics (silent by default)
 ```
 
 ## 3. Open the dashboard
@@ -182,7 +183,7 @@ another one.
 | --- | --- | --- |
 | `403` on the dashboard | Missing or wrong `key=` | Use the full printed URL |
 | `Find TV` finds nothing | SSDP blocked, VPN, or guest Wi-Fi | Enter the IP manually; disable the VPN; use the main SSID |
-| `Port 36669 responds, but Sidee could not verify a VIDAA TV` | The control port answered, but none of the descriptor endpoints identified the device | Run the descriptor checks below, then check the IP |
+| `Port 36669 responds, but Sidee could not verify a VIDAA TV` + `Tried …` | The control port answered, but none of the descriptor endpoints identified the device; the message names each one and its status | Run the descriptor checks below, then check the IP |
 | `No VIDAA TV description or port 36669 response at that IP` | Host unreachable or port closed | Check the address, the TV subnet, and any firewall |
 | `... rc=5` for every profile | Broker refused all four credential profiles | Firmware not supported; see the compatibility notes |
 | `no PIN from profile X: trying the next one` | Connected but ignored — the fallback working | Wait; the next profile is being tried |
@@ -191,6 +192,29 @@ another one.
 | `Sidee is already preparing this folder` | A real second launch holds the lock | Wait for it, or close the other window |
 | `ModuleNotFoundError: No module named 'paho'` | Ran `sidee.py` directly instead of the launcher | Use `./start-linux.sh`, or `sudo pacman -S python-paho-mqtt` |
 | Browser does not open | No `xdg-open` / headless session | Open the printed URL; use `--headless` over SSH |
+
+### Getting diagnostics
+
+Nothing is printed beyond the dashboard links unless you ask for it. `-v`
+(`--verbose`) turns on tagged diagnostics for the whole run: the interfaces and
+search targets used for discovery, every descriptor URL with its status code,
+the auth profile outcomes, and the install result.
+
+```bash
+./start-linux.sh -v
+# or, from the installed package:
+sidee -v
+
+[06:35:59] discovery: interfaces: 192.168.1.0/192.168.1.255
+[06:35:59] discovery: search targets: 192.168.1.255, 255.255.255.255, 239.255.255.250
+[06:36:03] discovery: 0 SSDP repl(y/ies) in 4s
+[06:36:15] tv: descriptor http://192.168.1.50:18400/description.xml: HTTP 404
+[06:36:18] tv: descriptor https://192.168.1.50:38400/description.xml: HTTP 200
+[06:36:18] tv: descriptor https://192.168.1.50:38400/description.xml: VIDAA (Living room)
+```
+
+Run it in a terminal (`Ctrl+C` to stop) so the lines stay visible; logs contain no
+PIN, no tokens and no dashboard key.
 
 ### When the IP check cannot identify the TV
 

@@ -71,22 +71,32 @@ def _probe_tv_ip(host: str) -> dict:
     subnets = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
     if not any(address in ipaddress.IPv4Network(net) for net in subnets):
         return {"ok": False, "error": "Use a private IPv4 address on your home network."}
-    info = client.fetch_descriptor(str(address))
+    attempts: list[tuple[str, object]] = []
+    info = client.fetch_descriptor(str(address), attempts=attempts)
     try:
         with socket.create_connection((str(address), client.MQTT_PORT), timeout=2):
             mqtt_open = True
-    except OSError:
+    except OSError as error:
         mqtt_open = False
+        client.log("tv", f"probe {address}: port {client.MQTT_PORT} "
+                           f"{type(error).__name__}")
     if not info or not info.is_vidaa:
+        tried = client.describe_attempts(attempts)
+        client.log("tv", f"probe {address}: mqtt "
+                           f"{'open' if mqtt_open else 'closed'}; {tried}")
         message = ("Port 36669 responds, but Sidee could not verify a VIDAA TV "
                    "using its device description." if mqtt_open else
                    "No VIDAA TV description or port 36669 response at that IP. "
                    "Check the TV address, its network and VPN settings.")
+        if tried:
+            message += f" Tried {tried}."
         return {"ok": False, "error": message}
     if not mqtt_open:
         return {"ok": False, "error": "VIDAA TV found, but TCP port 36669 is "
                 "unreachable. Check local network permissions, VPN, firewall "
                 "and Wi-Fi isolation."}
+    client.log("tv", f"probe {address}: verified as {info.friendly_name} "
+                       f"(brand={info.brand})")
     return {"ok": True, "tv": {**info.__dict__, "raw_description": ""},
             "message": "VIDAA TV verified by IP. Automatic SSDP discovery may "
                        "be blocked; PIN pairing is still required."}

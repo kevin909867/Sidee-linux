@@ -202,6 +202,45 @@ class TestManualTvIP(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("verify", result["error"])
 
+    def test_failed_probe_reports_the_endpoints_it_asked(self):
+        def nobody_home(host, location=None, attempts=None):
+            attempts.append((f"http://{host}:18400/description.xml", "HTTP 404"))
+            attempts.append((f"https://{host}:38400/description.xml", "ConnectionRefusedError"))
+            return None
+
+        with patch("core.webui.client.fetch_descriptor", side_effect=nobody_home), \
+             patch("core.webui.socket.create_connection"):
+            result = webui._probe_tv_ip("192.168.3.4")
+        self.assertFalse(result["ok"])
+        self.assertIn("/description.xml on http:18400 -> HTTP 404", result["error"])
+        self.assertIn("ConnectionRefusedError", result["error"])
+
+
+class TestVerboseLogging(unittest.TestCase):
+    def setUp(self):
+        client.set_verbose(False)
+        self.addCleanup(client.set_verbose, False)
+
+    def test_diagnostics_are_silent_until_requested(self):
+        with patch("builtins.print") as output:
+            client.log("tv", "descriptor probe")
+        output.assert_not_called()
+
+    def test_verbose_flag_prints_tagged_diagnostics(self):
+        client.set_verbose(True)
+        with patch("builtins.print") as output:
+            client.log("tv", "descriptor probe")
+        line = output.call_args.args[0]
+        self.assertIn("tv: descriptor probe", line)
+
+    def test_cli_verbose_flag_reaches_the_client(self):
+        import sidee
+        with patch.object(sys, "argv", ["sidee", "-v", "discover"]), \
+                patch.object(client, "set_verbose") as verbose, \
+                patch.object(client, "discover", return_value=[]):
+            sidee.main()
+        verbose.assert_called_once_with(True)
+
 
 class TestCertificateBundle(unittest.TestCase):
     def setUp(self):

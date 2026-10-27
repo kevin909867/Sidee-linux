@@ -363,6 +363,9 @@ def discover(timeout: float = 4.0) -> list[TvInfo]:
         # each adapter's actual subnet, as measured with the official mobile app.
         targets = list(dict.fromkeys(_local_broadcasts(interfaces)
                                     + [SSDP_BROADCAST, SSDP_MULTICAST]))
+        log("discovery", "interfaces: " + (", ".join(
+            f"{host}/{target}" for host, target in interfaces) or "none reported"))
+        log("discovery", "search targets: " + ", ".join(targets))
         for target in targets:
             _msearch(sock, target)
         end = time.time() + timeout
@@ -385,6 +388,7 @@ def discover(timeout: float = 4.0) -> list[TvInfo]:
         if notify is not None:
             notify.close()
 
+    log("discovery", f"{len(locations)} SSDP repl(y/ies) in {timeout:g}s")
     found: dict[str, TvInfo] = {}
     for host, loc in locations.items():
         info = fetch_descriptor(host, loc)
@@ -434,7 +438,22 @@ def _descriptor_is_vidaa(xml: str, description: str) -> bool:
             or "hisense" in xml.lower() or "vidaa" in xml.lower())
 
 
-def fetch_descriptor(host: str, location: str | None = None) -> TvInfo | None:
+def describe_attempts(attempts: list[tuple[str, object]], limit: int = 4) -> str:
+    """Readable summary of descriptor endpoints for a failed verification.
+
+    The dashboard cannot explain a refusal without this: "could not verify"
+    covers 404, timeout, refused and a reachable-but-generic description.
+    """
+    shown = [f"{urllib.parse.urlsplit(loc).path} on "
+             f"{urllib.parse.urlsplit(loc).scheme or 'http'}:{urllib.parse.urlsplit(loc).port}"
+             f" -> {status}" for loc, status in attempts[:limit]]
+    if len(attempts) > limit:
+        shown.append(f"and {len(attempts) - limit} more")
+    return "; ".join(shown)
+
+
+def fetch_descriptor(host: str, location: str | None = None,
+                     attempts: list[tuple[str, object]] | None = None) -> TvInfo | None:
     """Download the UPnP descriptor and identify a VIDAA TV.
 
     An advertised SSDP location is authoritative when one is given. Without it
@@ -457,6 +476,9 @@ def fetch_descriptor(host: str, location: str | None = None) -> TvInfo | None:
             conn.request("GET", target)
             r = conn.getresponse()
             xml = r.read().decode("utf-8", "replace")
+            if attempts is not None:
+                attempts.append((loc, f"HTTP {r.status}"))
+            log("tv", f"descriptor {loc}: HTTP {r.status}")
             if r.status != 200:
                 continue
             name = re.search(r"<friendlyName>([^<]+)<", xml)
@@ -469,11 +491,17 @@ def fetch_descriptor(host: str, location: str | None = None) -> TvInfo | None:
                           is_vidaa=_descriptor_is_vidaa(xml, desc),
                           brand=_descriptor_brand(desc),
                           raw_description=xml)
+            log("tv", f"descriptor {loc}: "
+                       f"{'VIDAA' if info.is_vidaa else 'not VIDAA'} "
+                       f"({info.friendly_name})")
             if info.is_vidaa:
                 return info
             if fallback is None:
                 fallback = info
-        except (OSError, ValueError, http.client.HTTPException):
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            if attempts is not None:
+                attempts.append((loc, type(error).__name__))
+            log("tv", f"descriptor {loc}: {type(error).__name__}")
             continue
         finally:
             conn.close()
@@ -987,5 +1015,19 @@ def sha256_short(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()[:12]
 
 
+# Console diagnostics stay off unless the user asks for them with -v/--verbose;
+# the dashboard has its own activity log and the CLI reports its own errors.
+VERBOSE = False
+
+
+def set_verbose(enabled: bool) -> None:
+    global VERBOSE
+    VERBOSE = bool(enabled)
+
+
 def log(tag: str, msg: str) -> None:
-    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {tag}: {msg}")
+    """Diagnostic line on stdout, only when verbose output was requested."""
+    if not VERBOSE:
+        return
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {tag}: {msg}",
+          flush=True)
