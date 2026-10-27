@@ -28,6 +28,13 @@ SSDP_PORT = 1900
 SSDP_MEDIA_RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 MQTT_PORT = 36669
 UPNP_PORTS = (18400, 38400, 80)
+# Documented descriptor endpoints. Sets that predate the MediaServer layout
+# serve /description.xml instead, and many serve it over the self-signed TLS
+# on 38400, so the identity check must not assume one path or plain HTTP.
+UPNP_PATHS = ("/MediaServer/rendererdevicedesc.xml", "/description.xml")
+# Probing every endpoint must not stall the dashboard when a host silently
+# drops packets, so the whole lookup shares one time budget.
+DESCRIPTOR_BUDGET = 10.0
 
 
 # --- Client certificate (extracted from the official app, encoded blob) ---
@@ -386,20 +393,67 @@ def discover(timeout: float = 4.0) -> list[TvInfo]:
     return sorted(found.values(), key=lambda t: t.host)
 
 
+def _descriptor_locations(host: str) -> list[str]:
+    """Documented descriptor endpoints, plain HTTP first, then the self-signed
+    TLS on 38400 that many sets expose as their only descriptor service."""
+    return ([f"http://{host}:{port}{path}"
+             for port in UPNP_PORTS for path in UPNP_PATHS]
+            + [f"https://{host}:38400{path}" for path in UPNP_PATHS])
+
+
+def _descriptor_connection(loc: str) -> tuple[object, str] | None:
+    """Connection and request target for a descriptor URL, or None if unusable.
+
+    The TV certificate is self-signed, so the descriptor GET does not verify it.
+    Nothing secret is exchanged: the request identifies the device, and the
+    pairing PIN remains the authorization step.
+    """
+    u = urllib.parse.urlsplit(loc)
+    if not u.hostname or u.username or u.password:
+        return None
+    target = (u.path or "/") + ("?" + u.query if u.query else "")
+    try:
+        port = u.port
+    except ValueError:  # out-of-range or non-numeric port: never dial it
+        return None
+    if u.scheme == "http":
+        return http.client.HTTPConnection(u.hostname, port or 80,
+                                          timeout=3), target
+    if u.scheme == "https":
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return http.client.HTTPSConnection(u.hostname, port or 443,
+                                           timeout=3,
+                                           context=context), target
+    return None
+
+
+def _descriptor_is_vidaa(xml: str, description: str) -> bool:
+    return ("vidaa_support" in description or "transport_protocol" in description
+            or "hisense" in xml.lower() or "vidaa" in xml.lower())
+
+
 def fetch_descriptor(host: str, location: str | None = None) -> TvInfo | None:
-    """Download the UPnP descriptor and identify a VIDAA TV."""
-    locations = [location] if location else [
-        f"http://{host}:{port}/MediaServer/rendererdevicedesc.xml" for port in UPNP_PORTS]
-    for loc in locations:
-        conn = None
+    """Download the UPnP descriptor and identify a VIDAA TV.
+
+    An advertised SSDP location is authoritative when one is given. Without it
+    (the manual IP check) every documented endpoint is tried, because sets on
+    older firmware serve the descriptor on another port, under another path, or
+    only over their self-signed TLS. A descriptor carrying VIDAA markers wins
+    over one that does not, so a generic reply cannot shadow the real answer.
+    """
+    candidates = [location] if location else _descriptor_locations(host)
+    fallback = None
+    deadline = time.monotonic() + DESCRIPTOR_BUDGET
+    for loc in candidates:
+        if time.monotonic() > deadline:
+            break
+        described = _descriptor_connection(loc)
+        if described is None:
+            continue
+        conn, target = described
         try:
-            u = urllib.parse.urlsplit(loc)
-            if u.scheme != "http" or not u.hostname or u.username or u.password:
-                return None
-            conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=3)
-            target = u.path or "/"
-            if u.query:
-                target += "?" + u.query
             conn.request("GET", target)
             r = conn.getresponse()
             xml = r.read().decode("utf-8", "replace")
@@ -409,27 +463,41 @@ def fetch_descriptor(host: str, location: str | None = None) -> TvInfo | None:
             model = re.search(r"<modelDescription>(.*?)</modelDescription>",
                               xml, re.S)
             desc = model.group(1) if model else ""
-            is_vidaa = ("vidaa_support" in desc or "transport_protocol" in desc
-                        or "hisense" in xml.lower() or "vidaa" in xml.lower())
-            return TvInfo(host=host, friendly_name=(name.group(1) if name else host),
-                          model=desc.strip()[:120], is_vidaa=is_vidaa,
+            info = TvInfo(host=host,
+                          friendly_name=(name.group(1) if name else host),
+                          model=desc.strip()[:120],
+                          is_vidaa=_descriptor_is_vidaa(xml, desc),
                           brand=_descriptor_brand(desc),
                           raw_description=xml)
+            if info.is_vidaa:
+                return info
+            if fallback is None:
+                fallback = info
         except (OSError, ValueError, http.client.HTTPException):
             continue
         finally:
-            if conn is not None:
-                conn.close()
-    return None
+            conn.close()
+    return fallback
 
 
 def tv_timestamp(host: str) -> int:
-    """TV clock from the UPnP descriptor's Date header."""
-    for port in UPNP_PORTS:
-        conn = None
+    """TV clock from the UPnP descriptor's Date header.
+
+    The pairing password is derived from this timestamp, so the same set of
+    endpoints as the descriptor lookup is used: a TV that only serves
+    /description.xml (or only over TLS on 38400) must still report its clock
+    instead of silently falling back to the computer's clock.
+    """
+    deadline = time.monotonic() + DESCRIPTOR_BUDGET
+    for loc in _descriptor_locations(host):
+        if time.monotonic() > deadline:
+            break
+        described = _descriptor_connection(loc)
+        if described is None:
+            continue
+        conn, target = described
         try:
-            conn = http.client.HTTPConnection(host, port, timeout=3)
-            conn.request("GET", "/MediaServer/rendererdevicedesc.xml")
+            conn.request("GET", target)
             r = conn.getresponse()
             r.read()
             date = r.headers.get("Date", "")
@@ -440,8 +508,7 @@ def tv_timestamp(host: str) -> int:
         except (OSError, ValueError, http.client.HTTPException):
             continue
         finally:
-            if conn is not None:
-                conn.close()
+            conn.close()
     return int(time.time())
 
 

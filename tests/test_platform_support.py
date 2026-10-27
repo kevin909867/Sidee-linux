@@ -218,14 +218,38 @@ class TestSocketLifecycle(unittest.TestCase):
         notify.close.assert_called_once()
 
     def test_tv_clock_connections_are_closed_after_request_failure(self):
-        connections = [Mock(), Mock(), Mock()]
-        for connection in connections:
+        connections = []
+
+        def unreachable(*args, **kwargs):
+            connection = Mock()
             connection.request.side_effect = OSError("TV offline")
-        with patch.object(client.http.client, "HTTPConnection", side_effect=connections), \
+            connections.append(connection)
+            return connection
+
+        with patch.object(client.http.client, "HTTPConnection", side_effect=unreachable), \
+                patch.object(client.http.client, "HTTPSConnection", side_effect=unreachable), \
                 patch.object(client.time, "time", return_value=123):
             self.assertEqual(client.tv_timestamp("192.168.88.42"), 123)
+        # Every documented endpoint is probed, and none may leak a connection.
+        self.assertEqual(len(connections),
+                         len(client._descriptor_locations("192.168.88.42")))
         for connection in connections:
             connection.close.assert_called_once()
+
+    def test_tv_clock_reads_the_older_description_endpoint(self):
+        missing = Mock()
+        missing.getresponse.return_value = Mock(status=404, read=Mock(return_value=b""),
+                                              headers={})
+        found = Mock()
+        found.getresponse.return_value = Mock(
+            status=200, read=Mock(return_value=b""),
+            headers={"Date": "Wed, 21 Oct 2026 07:28:00 GMT"})
+        with patch.object(client.http.client, "HTTPConnection",
+                          side_effect=[missing, found]):
+            stamp = client.tv_timestamp("192.168.88.42")
+        # 2026-10-21T07:28:00Z: the TV clock must come from the TV, not the host.
+        self.assertEqual(stamp, 1792567680)
+        found.request.assert_called_once_with("GET", "/description.xml")
 
     def test_exclusive_windows_binding_keeps_existing_behavior(self):
         connection = Mock()

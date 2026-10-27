@@ -2,7 +2,7 @@
 import http.client
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from core import client, presets, webui
 import sidee
@@ -39,6 +39,58 @@ class TestDescriptorAddresses(unittest.TestCase):
         with patch.object(client.http.client, "HTTPConnection", return_value=connection):
             self.assertIsNone(client.fetch_descriptor("192.168.88.73", "http://192.168.88.73/"))
         connection.close.assert_called_once()
+
+    def test_descriptor_falls_back_to_the_older_description_path(self):
+        # Sets that predate the MediaServer layout answer 404 on that path.
+        missing = Mock()
+        missing.getresponse.return_value = Mock(status=404, read=Mock(return_value=b""))
+        found = self.descriptor()
+        connections = [missing, found]
+        with patch.object(client.http.client, "HTTPConnection",
+                          side_effect=connections):
+            tv = client.fetch_descriptor("192.168.88.73")
+        self.assertIsNotNone(tv)
+        self.assertTrue(tv.is_vidaa)
+        missing.request.assert_called_once_with(
+            "GET", "/MediaServer/rendererdevicedesc.xml")
+        found.request.assert_called_once_with("GET", "/description.xml")
+        for connection in connections:
+            connection.close.assert_called_once()
+
+    def test_self_signed_https_descriptor_on_38400_is_accepted(self):
+        offline = Mock()
+        offline.request.side_effect = OSError("no plain HTTP descriptor")
+        secure = self.descriptor()
+        with patch.object(client.http.client, "HTTPConnection", return_value=offline), \
+                patch.object(client.http.client, "HTTPSConnection",
+                             return_value=secure) as https:
+            tv = client.fetch_descriptor("192.168.88.73")
+        self.assertTrue(tv.is_vidaa)
+        https.assert_called_once_with("192.168.88.73", 38400, timeout=3,
+                                      context=ANY)
+        secure.request.assert_called_once_with(
+            "GET", "/MediaServer/rendererdevicedesc.xml")
+
+    def test_generic_descriptor_does_not_shadow_the_vidaa_one(self):
+        router = Mock()
+        router.getresponse.return_value = Mock(
+            status=200, read=Mock(return_value=b"<root><friendlyName>Router</friendlyName></root>"))
+        real = self.descriptor()
+        with patch.object(client.http.client, "HTTPConnection",
+                          side_effect=[router, real]):
+            tv = client.fetch_descriptor("192.168.88.73")
+        self.assertTrue(tv.is_vidaa)
+        self.assertEqual(tv.friendly_name, "Bedroom TV")
+
+    def test_generic_descriptor_alone_stays_unverified(self):
+        router = Mock()
+        router.getresponse.return_value = Mock(
+            status=200, read=Mock(return_value=b"<root><friendlyName>Router</friendlyName></root>"))
+        with patch.object(client.http.client, "HTTPConnection", return_value=router):
+            tv = client.fetch_descriptor("192.168.88.73")
+        # Reported, but never accepted as a TV: an open port cannot self-approve.
+        self.assertIsNotNone(tv)
+        self.assertFalse(tv.is_vidaa)
 
     def test_invalid_descriptor_urls_do_not_open_connections(self):
         with patch.object(client.http.client, "HTTPConnection") as connect:
