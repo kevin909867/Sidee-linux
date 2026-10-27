@@ -258,13 +258,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         confirmed = any(client.tile_matches_request(a, p["app_id"], p["url"])
                         for a in found)
         dups = len(found)
+        if confirmed:
+            message = None
+        elif found:
+            # The tile exists under this app id but with another address, so the
+            # launcher may only be lagging behind its own refresh.
+            message = (p["name"] + " is on the TV but not confirmed at its "
+                       "current address yet; the launcher may update shortly.")
+        else:
+            message = (p["name"] + " was not registered by the TV. Check Home "
+                       "before trying again.")
+        if not confirmed:
+            message += " " + presets.manual_install_steps(p)
         return {"ok": confirmed,
                 "status": "installed" if confirmed else "unconfirmed",
                 "error": None,
-                "message": None if confirmed else
-                p["name"] + " installation was requested, but the TV has not "
-                "confirmed its current address yet. Check Home on your TV "
-                "before trying again.",
+                "message": message,
                 "duplicates": max(0, dups - 1) if found else 0}
 
 

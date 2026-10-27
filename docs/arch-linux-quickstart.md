@@ -136,6 +136,33 @@ Tiles stay in the launcher across TV restarts and after Sidee is closed. The til
 opens a web app, so whatever it points at (your Jellyfin server, a streaming
 site) still needs to be reachable from the TV itself.
 
+### If the tile does not appear
+
+Network tile registration is not a VIDAA feature. No public project installs a
+tile over the TV's control interface, and older firmware (U6-era, `V0000.06.x`)
+silently ignores the request — pairing works, `NOT confirmed by the TV` comes back,
+and Home stays unchanged. That is the firmware, not a bad PIN.
+
+The documented route on those sets is the TV's own browser:
+
+1. On the TV, open the **Browser** app.
+2. Type `hisense://debug` and confirm.
+3. Enter the tile's **name** and **address** (Sidee prints both, and the dashboard
+   shows them in the install message).
+4. Choose **Install**.
+
+Values for the built-in tiles:
+
+| Tile | Name | Address |
+| --- | --- | --- |
+| Nuvio | `Nuvio` | `https://nuviotvsmart.vercel.app/vidaa.html` |
+| Stremio | `Stremio` | `https://noobygains.github.io/stremio-vidaa-tv/?install_source=sidee` |
+| Jellyfin | `Jellyfin` | `http://YOUR_SERVER:8096/web/index.html` |
+
+The tile lands at the end of **My Apps**; restart the TV if it does not appear.
+This is a documented workaround reported by other projects, not something Sidee
+can verify on your model.
+
 ## 6. Command line instead of the dashboard
 
 The same operations without a browser:

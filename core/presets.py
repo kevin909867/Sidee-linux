@@ -44,6 +44,21 @@ def get(key: str) -> dict | None:
     return PRESETS.get(key.lower())
 
 
+def manual_install_steps(preset: dict) -> str:
+    """Instructions for firmware that ignores network tile registration.
+
+    No public VIDAA project installs a tile over MQTT; the documented route on
+    older builds (U6-era, V0000.06.x) is the TV's own browser. The same tile can
+    still be added by hand with these two values.
+    """
+    return ("This TV did not register the tile over the network, which older "
+            "VIDAA firmware does not support. Add it on the TV itself: open "
+            "the Browser app, type hisense://debug, enter the name "
+            f'"{preset["name"]}" and the address "{preset["url"]}", then '
+            "choose Install. The tile appears at the end of My Apps; restart "
+            "the TV if it does not show up.")
+
+
 def is_private_host(server: str) -> bool:
     """True for local/private network (LAN) hosts: HTTP is allowed only there."""
     host = (urlsplit(server if "://" in server else "//" + server).hostname or "").rstrip(".")

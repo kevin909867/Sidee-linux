@@ -63,6 +63,8 @@ def cmd_cli(a) -> int:
         ok = any(client.tile_matches_request(x, p["app_id"], p["url"]) for x in apps)
         print(f"{'REGISTERED' if ok else 'NOT confirmed by the TV'}: "
               f"{p['name']} ({p['app_id']}) -> {p['url']}")
+        if not ok:
+            print(presets.manual_install_steps(p))
         return 0 if ok else 1
     if a.cmd == "launch":
         p = presets.get(a.preset)

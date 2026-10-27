@@ -255,6 +255,32 @@ class TestVerboseLogging(unittest.TestCase):
         verbose.assert_called_once_with(True)
 
 
+class TestManualInstallFallback(unittest.TestCase):
+    def test_steps_name_the_tile_and_the_tv_browser_route(self):
+        preset = presets.get("nuvio")
+        text = presets.manual_install_steps(preset)
+        self.assertIn("hisense://debug", text)
+        self.assertIn("Nuvio", text)
+        self.assertIn(preset["url"], text)
+
+    def test_unconfirmed_network_install_points_at_the_tv_browser(self):
+        handler = object.__new__(webui.Handler)
+        with patch.object(client.Session, "load"), \
+             patch.object(client, "add_tile", return_value=[]):
+            result = handler._install({"app": "nuvio"})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "unconfirmed")
+        self.assertIn("hisense://debug", result["message"])
+        self.assertIn("https://nuviotvsmart.vercel.app/vidaa.html", result["message"])
+
+    def test_jellyfin_steps_carry_the_users_own_server_url(self):
+        handler = object.__new__(webui.Handler)
+        with patch.object(client.Session, "load"), \
+             patch.object(client, "add_tile", return_value=[]):
+            result = handler._install({"app": "jellyfin", "server": "10.1.1.20:8096"})
+        self.assertIn("http://10.1.1.20:8096/web/index.html", result["message"])
+
+
 class TestCertificateBundle(unittest.TestCase):
     def setUp(self):
         import tempfile
