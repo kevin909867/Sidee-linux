@@ -25,6 +25,9 @@ PRESETS: dict[str, dict] = {
         "server_optional": True,
         "server_placeholder": "Streaming server URL (optional)",
         "image": "https://noobygains.github.io/stremio-vidaa-tv/icon.png",
+        # Published in the VIDAA app store, so it survives firmware that has no
+        # way to add a web tile at all.
+        "store_alternative": "Stremio Lite",
         "description": "Full Stremio TV for VIDAA with D-pad navigation",
     },
     "jellyfin": {
@@ -48,15 +51,24 @@ def manual_install_steps(preset: dict) -> str:
     """Instructions for firmware that ignores network tile registration.
 
     No public VIDAA project installs a tile over MQTT; the documented route on
-    older builds (U6-era, V0000.06.x) is the TV's own browser. The same tile can
-    still be added by hand with these two values.
+    older builds (U6-era, V0000.06.x) is the TV's own browser. Not every build
+    ships that installer, and a rejected scheme cannot be retried into working,
+    so a bookmark is named as the honest fallback instead of another attempt.
     """
-    return ("This TV did not register the tile over the network, which older "
-            "VIDAA firmware does not support. Add it on the TV itself: open "
-            "the Browser app, type hisense://debug, enter the name "
-            f'"{preset["name"]}" and the address "{preset["url"]}", then '
-            "choose Install. The tile appears at the end of My Apps; restart "
-            "the TV if it does not show up.")
+    steps = ("This TV did not register the tile over the network, which older "
+             "VIDAA firmware does not support. Add it on the TV itself: open "
+             "the Browser app, type hisense://debug, enter the name "
+             f'"{preset["name"]}" and the address "{preset["url"]}", then '
+             "choose Install. The tile appears at the end of My Apps; restart "
+             "the TV if it does not show up. If the Browser rejects that "
+             'address as invalid, this build has no debug installer: open the '
+             f'address "{preset["url"]}" in the Browser and bookmark it, which '
+             "works immediately but lives in the Browser, not on Home.")
+    store = preset.get("store_alternative")
+    if store:
+        steps += (f" {store} is also published in the TV's own app store, so "
+                  "it can be installed there without any of this.")
+    return steps
 
 
 def is_private_host(server: str) -> bool:

@@ -280,6 +280,20 @@ class TestManualInstallFallback(unittest.TestCase):
             result = handler._install({"app": "jellyfin", "server": "10.1.1.20:8096"})
         self.assertIn("http://10.1.1.20:8096/web/index.html", result["message"])
 
+    def test_rejected_installer_offers_a_bookmark_instead(self):
+        text = presets.manual_install_steps(presets.get("nuvio"))
+        self.assertIn("no debug installer", text)
+        self.assertIn("bookmark", text)
+
+    def test_stremio_names_its_app_store_version(self):
+        text = presets.manual_install_steps(presets.get("stremio"))
+        self.assertIn("Stremio Lite", text)
+
+    def test_presets_without_a_store_version_stay_silent_about_one(self):
+        for key in ("nuvio", "jellyfin"):
+            self.assertNotIn("app store",
+                             presets.manual_install_steps(presets.get(key)))
+
 
 class TestCertificateBundle(unittest.TestCase):
     def setUp(self):

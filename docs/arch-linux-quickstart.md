@@ -151,6 +151,17 @@ The documented route on those sets is the TV's own browser:
    shows them in the install message).
 4. Choose **Install**.
 
+`hisense://debug` is the correct address — lowercase, no trailing slash. **Not
+every build ships that page.** If the Browser answers *"please enter a valid
+address"*, that firmware has no debug installer, and there is no alternate
+spelling, bookmark or `http://` equivalent that opens it: the handler is simply
+absent. In that case the address can still be **bookmarked** in the Browser, which
+works immediately but lives in the Browser's bookmarks rather than on Home.
+
+For Stremio there is a better option than any of this: **Stremio Lite** is
+published in the TV's own VIDAA app store, so it installs without a tile, a
+bookmark or a debug page.
+
 Values for the built-in tiles:
 
 | Tile | Name | Address |
